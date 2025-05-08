@@ -1643,42 +1643,124 @@ class NetworkAnalyzer {
      */
     _calculateNetworkRisk() {
         // Count high risk nodes and connections
-        const nodeCount = this.networkData.nodes.length;
-        const highRiskNodes = this.networkData.nodes.filter(node => node.riskLevel >= 0.7).length;
-        const highRiskRatio = nodeCount > 0 ? highRiskNodes / nodeCount : 0;
+        const totalNodes = this.networkData.nodes.length;
+        const walletNodes = this.networkData.nodes.filter(node => node.type === 'wallet');
+        const highRiskNodes = this.networkData.nodes.filter(node => node.riskLevel >= 0.7);
         
-        // Calculate suspicious connection ratio
-        const linkCount = this.networkData.links.length;
-        const suspiciousLinkCount = this.networkData.links.filter(link => link.suspicious).length;
-        const suspiciousLinkRatio = linkCount > 0 ? suspiciousLinkCount / linkCount : 0;
+        // Calculate high risk ratio (weight more heavily for accuracy)
+        const highRiskRatio = totalNodes > 0 ? Math.pow(highRiskNodes.length / totalNodes, 0.8) : 0;
         
-        // Consider the number of high-risk early participants
+        // Check for known high-risk wallets (these have highest impact)
+        const knownHighRiskWallets = this.networkData.nodes.filter(node => {
+            if (node.type !== 'wallet') return false;
+            const baseAddress = node.id.split(':')[0];
+            return HIGH_RISK_ADDRESSES.includes(baseAddress);
+        });
+        
+        // Known high-risk wallets are a strong indicator
+        const knownHighRiskImpact = knownHighRiskWallets.length > 0 ? 
+            Math.min(0.8, 0.3 + (knownHighRiskWallets.length * 0.1)) : 0;
+            
+        // Analyze suspicious connections 
+        const suspiciousLinks = this.networkData.links.filter(link => link.suspicious);
+        const suspiciousLinkRatio = suspiciousLinks.length > 0 ? 
+            suspiciousLinks.length / Math.max(5, this.networkData.links.length) : 0;
+            
+        // Analyze early participants
         const earlyParticipants = this.networkData.nodes.filter(node => node.earlyParticipant);
         const highRiskEarlyParticipants = earlyParticipants.filter(node => node.riskLevel >= 0.6);
-        const earlyParticipantRisk = earlyParticipants.length > 0 ? 
-            highRiskEarlyParticipants.length / earlyParticipants.length : 0;
+        const earlyParticipantRiskRatio = earlyParticipants.length > 0 ? 
+            Math.pow(highRiskEarlyParticipants.length / earlyParticipants.length, 0.7) : 0;
         
-        // Consider buying patterns
-        const walletsWithPatterns = this.networkData.nodes.filter(node => 
-            node.type === 'wallet' && node.buyingPattern && node.buyingPattern.risk > 0
-        );
-        const avgPatternRisk = walletsWithPatterns.length > 0 ?
-            walletsWithPatterns.reduce((sum, node) => sum + (node.buyingPattern?.risk || 0), 0) / walletsWithPatterns.length : 0;
+        // Analyze token risks
+        const tokenNodes = this.networkData.nodes.filter(node => node.type === 'token');
+        const highRiskTokens = tokenNodes.filter(node => node.riskLevel >= 0.6);
+        const tokenRiskRatio = tokenNodes.length > 0 ? 
+            Math.pow(highRiskTokens.length / tokenNodes.length, 0.9) : 0;
+            
+        // Examine creator wallet risk
+        const creatorWallets = this.networkData.nodes.filter(node => 
+            node.type === 'wallet' && node.isCreatorWallet);
+        let creatorRisk = 0;
         
-        // Consider known high-risk wallets
-        const knownHighRiskWallets = this.networkData.nodes
-            .filter(node => node.type === 'wallet' && HIGH_RISK_ADDRESSES.includes(node.id))
-            .length;
-        const knownHighRiskImpact = knownHighRiskWallets > 0 ? Math.min(1, knownHighRiskWallets * 0.3) : 0;
+        if (creatorWallets.length > 0) {
+            creatorRisk = creatorWallets.reduce((sum, wallet) => sum + wallet.riskLevel, 0) / creatorWallets.length;
+            creatorRisk = Math.pow(creatorRisk, 0.8); // Slightly reduce impact with power function
+        }
         
-        // Calculate weighted average of all risk factors
-        return (
-            (highRiskRatio * 0.3) +
-            (suspiciousLinkRatio * 0.2) +
-            (earlyParticipantRisk * 0.15) +
-            (avgPatternRisk * 0.15) +
-            (knownHighRiskImpact * 0.2)
-        );
+        // Check wallet interconnections (highly interconnected networks are riskier)
+        const interconnectionScore = this._calculateInterconnectionScore();
+        
+        // Calculate weighted risk score - adjust weights based on importance
+        // Known high-risk wallets have highest impact, followed by suspicious connections and early participants
+        let finalRiskScore = 0;
+        
+        if (knownHighRiskImpact > 0) {
+            // When known high-risk wallets are present, they become the dominant factor
+            finalRiskScore = 
+                (knownHighRiskImpact * 0.5) +
+                (highRiskRatio * 0.1) +
+                (suspiciousLinkRatio * 0.15) +
+                (earlyParticipantRiskRatio * 0.1) +
+                (tokenRiskRatio * 0.1) +
+                (creatorRisk * 0.05);
+                
+            // Adjust for interconnection to increase risk even further if interconnected
+            finalRiskScore = finalRiskScore * (1 + (interconnectionScore * 0.5));
+        } else {
+            // Normal calculation when no known high-risk wallets are present
+            finalRiskScore = 
+                (highRiskRatio * 0.25) +
+                (suspiciousLinkRatio * 0.25) +
+                (earlyParticipantRiskRatio * 0.2) +
+                (tokenRiskRatio * 0.15) +
+                (interconnectionScore * 0.1) +
+                (creatorRisk * 0.05);
+        }
+        
+        // Ensure score is capped at 1.0
+        return Math.min(1.0, finalRiskScore);
+    }
+    
+    /**
+     * Calculate the interconnection score of wallets
+     * Higher scores indicate more interconnected networks (riskier)
+     * @returns {number} - Interconnection score (0-1)
+     * @private
+     */
+    _calculateInterconnectionScore() {
+        const wallets = this.networkData.nodes.filter(node => 
+            node.type === 'wallet' && node.id !== this.networkData.mainNode);
+            
+        if (wallets.length < 3) {
+            return 0; // Too few wallets to analyze interconnections
+        }
+        
+        // Count wallet-to-wallet connections
+        let walletToWalletLinks = 0;
+        const walletIds = new Set(wallets.map(wallet => wallet.id));
+        
+        this.networkData.links.forEach(link => {
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+            
+            if (walletIds.has(sourceId) && walletIds.has(targetId)) {
+                walletToWalletLinks++;
+            }
+        });
+        
+        // Calculate theoretical maximum connections (complete graph)
+        const maxPossibleConnections = (wallets.length * (wallets.length - 1)) / 2;
+        
+        // Normalize to 0-1 range, with adjustment for more realistic scoring
+        // Few connections in a large network should still yield a low score
+        let interconnectionRatio = walletToWalletLinks / Math.max(1, maxPossibleConnections);
+        
+        // Apply sigmoid-like function to create better distribution
+        // This makes the middle range more sensitive and floors/ceilings the extremes
+        interconnectionRatio = interconnectionRatio / (0.2 + interconnectionRatio);
+        
+        return Math.min(1.0, interconnectionRatio);
     }
 
     /**
@@ -2381,8 +2463,151 @@ class NetworkAnalyzer {
                     }
                 }
             }
+            
+            // Now connect regular related wallets too (enhancement)
+            this._connectRelatedWallets();
         } catch (error) {
             console.error('Error connecting high-risk wallets:', error);
+        }
+    }
+    
+    /**
+     * Connect related wallets to each other based on transaction history
+     * This ensures that transaction networks are properly visualized
+     * @private
+     */
+    _connectRelatedWallets() {
+        try {
+            // Get all wallet nodes excluding the main node
+            const wallets = this.networkData.nodes.filter(node => 
+                node.type === 'wallet' && node.id !== this.networkData.mainNode
+            );
+            
+            // Skip if there are too few wallets
+            if (wallets.length < 2) {
+                return;
+            }
+            
+            console.log(`Checking relationships between ${wallets.length} wallets`);
+            
+            // Create a map of wallets with their interaction data
+            const walletInteractionMap = new Map();
+            
+            // Collect all wallets with interaction data
+            wallets.forEach(wallet => {
+                if (wallet.interactionData && (wallet.interactionData.paymentCount > 0 || wallet.interactionData.tokenTransfers > 0)) {
+                    walletInteractionMap.set(wallet.id, wallet);
+                }
+            });
+            
+            // Find wallets that have similar interaction patterns or transaction timing
+            for (let i = 0; i < wallets.length; i++) {
+                const wallet1 = wallets[i];
+                
+                // Skip wallets without interaction data
+                if (!wallet1.interactionData) continue;
+                
+                for (let j = i + 1; j < wallets.length; j++) {
+                    const wallet2 = wallets[j];
+                    
+                    // Skip wallets without interaction data
+                    if (!wallet2.interactionData) continue;
+                    
+                    // Skip if both wallets are high-risk (already connected)
+                    if ((wallet1.isHighRisk || HIGH_RISK_ADDRESSES.includes(wallet1.id.split(':')[0])) && 
+                        (wallet2.isHighRisk || HIGH_RISK_ADDRESSES.includes(wallet2.id.split(':')[0]))) {
+                        continue;
+                    }
+                    
+                    // Check for similar transaction timing
+                    const timeDiff = Math.abs(wallet1.interactionData.firstInteractionTime - wallet2.interactionData.firstInteractionTime);
+                    const timeDiffHours = timeDiff / (1000 * 60 * 60);
+                    
+                    // Check if wallets have similar transaction patterns (timing within 24 hours)
+                    // or if they have similar buying patterns
+                    const similarTiming = timeDiffHours < 24;
+                    const similarPatterns = wallet1.buyingPattern && wallet2.buyingPattern && 
+                                           wallet1.buyingPattern.pattern === wallet2.buyingPattern.pattern;
+                    
+                    // Connect wallets with similar patterns
+                    if (similarTiming || similarPatterns) {
+                        this._addConnection(wallet1.id, wallet2.id, {
+                            value: 1.5, // Lighter connection than high-risk
+                            suspicious: false,
+                            transactionType: 'RelatedWallets',
+                            relatedConnection: true
+                        });
+                    }
+                }
+            }
+            
+            // Connect early participants with each other
+            const earlyParticipants = wallets.filter(wallet => wallet.earlyParticipant);
+            for (let i = 0; i < earlyParticipants.length; i++) {
+                for (let j = i + 1; j < earlyParticipants.length; j++) {
+                    this._addConnection(earlyParticipants[i].id, earlyParticipants[j].id, {
+                        value: 1.5,
+                        suspicious: earlyParticipants[i].riskLevel > 0.6 || earlyParticipants[j].riskLevel > 0.6,
+                        transactionType: 'EarlyParticipants',
+                        earlyParticipantConnection: true
+                    });
+                }
+            }
+            
+            // Connect wallets that interacted with the same tokens
+            const tokenConnections = new Map(); // Map of token ID to list of connected wallets
+            
+            // Find wallets connected to the same tokens
+            this.networkData.links.forEach(link => {
+                const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+                const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+                
+                // Find node objects
+                const sourceNode = this.networkData.nodes.find(n => n.id === sourceId);
+                const targetNode = this.networkData.nodes.find(n => n.id === targetId);
+                
+                // Check if this is a wallet-to-token connection
+                if (sourceNode && targetNode && 
+                   ((sourceNode.type === 'wallet' && targetNode.type === 'token') ||
+                    (sourceNode.type === 'token' && targetNode.type === 'wallet'))) {
+                    
+                    const tokenId = sourceNode.type === 'token' ? sourceId : targetId;
+                    const walletId = sourceNode.type === 'wallet' ? sourceId : targetId;
+                    
+                    // Add to token connections map
+                    if (!tokenConnections.has(tokenId)) {
+                        tokenConnections.set(tokenId, []);
+                    }
+                    tokenConnections.get(tokenId).push(walletId);
+                }
+            });
+            
+            // Connect wallets that interacted with the same tokens
+            tokenConnections.forEach((connectedWallets, tokenId) => {
+                if (connectedWallets.length >= 2) {
+                    // Connect wallets that interacted with the same token
+                    for (let i = 0; i < connectedWallets.length; i++) {
+                        for (let j = i + 1; j < connectedWallets.length; j++) {
+                            // Skip connecting the main node to other wallets (already connected)
+                            if (connectedWallets[i] === this.networkData.mainNode || 
+                                connectedWallets[j] === this.networkData.mainNode) {
+                                continue;
+                            }
+                            
+                            this._addConnection(connectedWallets[i], connectedWallets[j], {
+                                value: 1, // Light connection
+                                suspicious: false,
+                                transactionType: 'SharedToken',
+                                sharedTokenConnection: true,
+                                tokenId: tokenId
+                            });
+                        }
+                    }
+                }
+            });
+            
+        } catch (error) {
+            console.error('Error connecting related wallets:', error);
         }
     }
 }

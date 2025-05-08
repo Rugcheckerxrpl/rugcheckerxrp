@@ -1041,47 +1041,65 @@ async function initializeApp(xrplService, networkAnalyzer) {
             .force('link', d3.forceLink(workingData.links)
                 .id(d => d.id)
                 .distance(d => {
-                    // Vary distance based on node types
-                    if (d.source.type === 'token' || d.target.type === 'token') return 150;
-                    if (d.earlyTransaction) return 100; // Keep early transaction connections closer
-                    return 120;
+                    // Use much larger distances for better spacing
+                    if (d.source.type === 'token' || d.target.type === 'token') return 180;
+                    if (d.earlyTransaction) return 150; // Keep early transaction connections closer
+                    if (d.highRiskConnection) return 200; // Separate high-risk connections more
+                    if (d.relatedConnection) return 170; // Medium distance for related wallets
+                    return 160; // Larger default distance
                 })
                 .strength(d => {
                     // Adjust link strength based on node types and properties
                     if (d.source.id === workingData.mainNode || d.target.id === workingData.mainNode) {
-                        return 0.7; // Stronger pull towards main node
+                        return 0.5; // Weaker pull towards main node for better spread
                     }
                     if (d.source.type === 'token' || d.target.type === 'token') {
-                        return 0.5; // Medium strength for token connections
+                        return 0.4; // Weaker strength for token connections
                     }
                     if (d.earlyParticipant) {
-                        return 0.6; // Stronger for early participants
+                        return 0.4; // Weaker for early participants
                     }
-                    return 0.4; // Default strength
+                    if (d.highRiskConnection) {
+                        return 0.6; // Stronger for high-risk connections
+                    }
+                    return 0.3; // Weaker default strength for better spreading
                 }))
             .force('charge', d3.forceManyBody()
                 .strength(d => {
-                    // Customize repulsion force based on node type
-                    if (d.id === workingData.mainNode) return -500; // Stronger repulsion for main node
-                    if (d.type === 'token') return -300; // Strong repulsion for tokens
-                    return -200; // Normal repulsion for other nodes
-                }))
-            .force('center', d3.forceCenter(width / 2, height / 2).strength(0.08))
+                    // Increase repulsion force for better distribution
+                    if (d.id === workingData.mainNode) return -800; // Stronger repulsion for main node
+                    if (d.type === 'token') return -500; // Strong repulsion for tokens
+                    if (d.isHighRisk) return -400; // Strong repulsion for high-risk wallets
+                    return -300; // Stronger repulsion for other nodes
+                })
+                .distanceMax(350)) // Limit the distance effect of repulsion
+            .force('center', d3.forceCenter(width / 2, height / 2).strength(0.05))
             .force('collide', d3.forceCollide()
-                .radius(d => d.radius * 1.5) // Increase collision radius to prevent overlap
-                .strength(0.7))
+                .radius(d => d.radius * 2.5) // Much larger collision radius to prevent overlap
+                .strength(0.8))
             .force('x', d3.forceX(width / 2).strength(d => {
-                // Custom strength to keep nodes centered on x-axis
-                if (d.type === 'token') return 0.04; // Weaker for tokens so they can move more freely
-                return 0.07;
+                // Custom strength to keep nodes centered on x-axis but allow more freedom
+                if (d.id === workingData.mainNode) return 0.1; // Stronger for main node
+                if (d.type === 'token') return 0.02; // Weaker for tokens
+                return 0.04; // Weaker for all other nodes
             }))
             .force('y', d3.forceY(height / 2).strength(d => {
-                // Custom strength to keep nodes centered on y-axis
-                if (d.type === 'token') return 0.04; // Weaker for tokens so they can move more freely
-                return 0.07;
+                // Custom strength to keep nodes centered on y-axis but allow more freedom
+                if (d.id === workingData.mainNode) return 0.1; // Stronger for main node
+                if (d.type === 'token') return 0.02; // Weaker for tokens
+                return 0.04; // Weaker for all other nodes
             }))
+            // Add radial force to distribute nodes in rings around center
+            .force('radial', d3.forceRadial(d => {
+                // Determine radius based on node type and connections
+                if (d.id === workingData.mainNode) return 0; // Center node at origin
+                if (d.isHighRisk) return Math.min(width, height) * 0.4; // High-risk in middle ring
+                if (d.type === 'token') return Math.min(width, height) * 0.3; // Tokens closer to center
+                if (d.earlyParticipant) return Math.min(width, height) * 0.35; // Early participants in middle
+                return Math.min(width, height) * 0.45; // Other nodes pushed outward
+            }, width / 2, height / 2).strength(0.3))
             .alpha(1)    // Start with maximum alpha for better initial arrangement
-            .alphaDecay(0.02); // Slower decay for more gradual settling
+            .alphaDecay(0.01); // Slower decay for more gradual settling
 
         // Define drag handler functions within the updateVisualization scope
         function dragstarted(event, d) {
@@ -2069,3 +2087,56 @@ function formatNumberWithCommas(number) {
         minimumFractionDigits: 0
     });
 } 
+
+// Initialize event listeners for feature buttons
+document.getElementById('alerts-button').addEventListener('click', function() {
+    showComingSoonAlert('Alert System');
+});
+
+document.getElementById('track-wallet-button').addEventListener('click', function() {
+    showComingSoonAlert('Wallet Tracking');
+});
+
+/**
+ * Show "Coming Soon" alert for features under development
+ * @param {string} featureName - Name of the coming feature
+ */
+function showComingSoonAlert(featureName) {
+    const alertBox = document.createElement('div');
+    alertBox.className = 'coming-soon-alert';
+    alertBox.innerHTML = `
+        <div class="alert-content">
+            <h4>${featureName} - Coming Soon!</h4>
+            <p>This feature is currently under development and will be available in a future update.</p>
+            <p class="alert-eta">Expected in Q2 2024</p>
+            <button class="alert-close-btn">Got it</button>
+        </div>
+    `;
+    
+    document.body.appendChild(alertBox);
+    
+    // Add fade-in effect
+    setTimeout(() => {
+        alertBox.classList.add('show');
+    }, 10);
+    
+    // Handle close button
+    alertBox.querySelector('.alert-close-btn').addEventListener('click', function() {
+        alertBox.classList.remove('show');
+        setTimeout(() => {
+            document.body.removeChild(alertBox);
+        }, 300);
+    });
+    
+    // Auto-close after 5 seconds
+    setTimeout(() => {
+        if (document.body.contains(alertBox)) {
+            alertBox.classList.remove('show');
+            setTimeout(() => {
+                if (document.body.contains(alertBox)) {
+                    document.body.removeChild(alertBox);
+                }
+            }, 300);
+        }
+    }, 5000);
+}
