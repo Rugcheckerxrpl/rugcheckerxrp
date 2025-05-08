@@ -1572,6 +1572,14 @@ async function initializeApp(xrplService, networkAnalyzer) {
             } else if (d.type === 'token') {
                 showTokenDetails(d, networkAnalyzer.networkData);
             }
+            
+            // Scroll to the scan results section
+            setTimeout(() => {
+                const resultsPanel = document.querySelector('.results-panel');
+                if (resultsPanel) {
+                    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 100);
         }
         
         // Function to show wallet details in the scan results area
