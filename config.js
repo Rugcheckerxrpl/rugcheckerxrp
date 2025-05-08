@@ -66,7 +66,12 @@ export const HIGH_RISK_ADDRESSES = [
     // Example list - in production this would be loaded from a database
     'rHYTJDFrbCU1i2yCENTSEgVFJUMWuFqeQj',
     'rG5Ro9e3uGEZVCpwYbLe21nVwXXCGXPkTu',
-    'rLpq5RcRzA8FU1yUqEPW4xfsdwon7caQfM'
+    'rLpq5RcRzA8FU1yUqEPW4xfsdwon7caQfM',
+    // Additional high-risk addresses
+    'r3XhydxYWps8EP6xzqs7dEU4DXMjBme95p', // Tag: 74920348
+    'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', // Tag: 330128380
+    'rJMwiqzh3agMG6Hqpa93ycy7GSKtT3EqRW',
+    'rnAgPrUpE3sWaNAaFhWdKhTL4uYUw1Cxuz' // Tag: 74920348
 ];
 
 // Validators for input validation

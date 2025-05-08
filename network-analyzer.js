@@ -118,6 +118,9 @@ class NetworkAnalyzer {
             
             // Analyze connected wallets through transactions
             const connectedWallets = new Set();
+            // Enhanced data collection for buying patterns
+            const walletInteractions = new Map();
+            
             for (const tx of transactions) {
                 // Skip invalid transactions
                 if (!tx || !tx.TransactionType) continue;
@@ -139,6 +142,39 @@ class NetworkAnalyzer {
                         suspicious: txRisk > 0.7,
                         transactionType: 'Payment'
                     });
+                    
+                    // Track wallet interactions and buying patterns
+                    if (!walletInteractions.has(tx.Destination)) {
+                        walletInteractions.set(tx.Destination, {
+                            paymentCount: 0,
+                            tokenTransfers: 0,
+                            totalValue: 0,
+                            firstInteractionTime: tx.date || Date.now(),
+                            patterns: {
+                                frequentSmallPayments: 0,
+                                largeOneTimePayments: 0
+                            }
+                        });
+                    }
+                    
+                    const interaction = walletInteractions.get(tx.Destination);
+                    interaction.paymentCount++;
+                    
+                    // Track token transfers
+                    if (typeof tx.Amount === 'object' && tx.Amount.currency) {
+                        interaction.tokenTransfers++;
+                    }
+                    
+                    // Track total value transferred
+                    const txAmount = this._normalizeAmount(tx.Amount);
+                    interaction.totalValue += txAmount;
+                    
+                    // Detect buying patterns
+                    if (txAmount < 100) {
+                        interaction.patterns.frequentSmallPayments++;
+                    } else if (txAmount > 1000) {
+                        interaction.patterns.largeOneTimePayments++;
+                    }
                 } 
                 else if (tx.TransactionType === 'TrustSet' && tx.LimitAmount) {
                     const trustIssuer = tx.LimitAmount.issuer;
@@ -151,6 +187,23 @@ class NetworkAnalyzer {
                             suspicious: txRisk > 0.5,
                             transactionType: 'TrustSet'
                         });
+                        
+                        // Track trust relationships
+                        if (!walletInteractions.has(trustIssuer)) {
+                            walletInteractions.set(trustIssuer, {
+                                paymentCount: 0,
+                                tokenTransfers: 0,
+                                totalValue: 0,
+                                firstInteractionTime: tx.date || Date.now(),
+                                patterns: {
+                                    frequentSmallPayments: 0,
+                                    largeOneTimePayments: 0
+                                },
+                                trustRelationship: true
+                            });
+                        } else {
+                            walletInteractions.get(trustIssuer).trustRelationship = true;
+                        }
                     }
                 }
             }
@@ -171,6 +224,9 @@ class NetworkAnalyzer {
                         // Calculate initial risk based on enhanced assessment
                         const initialRisk = await this._calculateWalletRisk(wallet);
                         
+                        // Get wallet interaction data
+                        const interactionData = walletInteractions.get(wallet) || {};
+                        
                         // Add additional properties for better visualization
                         const walletType = enhancedRisk.type || 'standard';
                         const isHighActivity = enhancedRisk.activityRisk > 0.6;
@@ -183,7 +239,9 @@ class NetworkAnalyzer {
                             walletType: walletType,
                             highActivity: isHighActivity,
                             potentialEarly: isPotentiallyEarly,
-                            enhancedRiskData: enhancedRisk
+                            enhancedRiskData: enhancedRisk,
+                            interactionData: interactionData, // Add interaction data to node
+                            buyingPattern: this._analyzeBuyingPattern(interactionData)
                         });
                         
                         // Only go deeper for wallets that aren't too high risk
@@ -626,11 +684,46 @@ class NetworkAnalyzer {
                     (1 - (txCount / RISK_FACTORS.wallet.lowActivity.threshold));
             }
             
-            // Check token issuances
+            // Cross-reference with known issuer addresses
             const issuedTokens = await xrplService.getIssuedTokens(address);
-            if (issuedTokens.length > RISK_FACTORS.wallet.manyIssuances.threshold) {
-                riskScore += RISK_FACTORS.wallet.manyIssuances.weight * 
-                    Math.min(1, (issuedTokens.length - RISK_FACTORS.wallet.manyIssuances.threshold) / 5);
+            if (issuedTokens.length > 0) {
+                // This wallet is an issuer
+                if (issuedTokens.length > RISK_FACTORS.wallet.manyIssuances.threshold) {
+                    riskScore += RISK_FACTORS.wallet.manyIssuances.weight * 
+                        Math.min(1, (issuedTokens.length - RISK_FACTORS.wallet.manyIssuances.threshold) / 5);
+                }
+                
+                // Check if any issued tokens have suspicious patterns
+                let suspiciousTokens = 0;
+                for (const token of issuedTokens) {
+                    if (this._hasTokenSuspiciousPattern(token)) {
+                        suspiciousTokens++;
+                    }
+                }
+                
+                if (suspiciousTokens > 0) {
+                    const suspiciousRatio = suspiciousTokens / issuedTokens.length;
+                    riskScore += suspiciousRatio * RISK_FACTORS.wallet.suspiciousPattern.weight;
+                }
+            }
+            
+            // Cross-reference with creator wallets and previous issued tokens
+            const creatorHistory = await this._checkCreatorHistory(address);
+            if (creatorHistory.previousRugs > 0) {
+                // If this wallet was previously involved in rug pulls, increase risk significantly
+                riskScore += Math.min(0.5, creatorHistory.previousRugs * 0.15);
+            }
+            
+            // Check for connections to known high-risk wallets
+            const connectedAddresses = await this._getConnectedAddresses(address);
+            const highRiskConnections = connectedAddresses.filter(addr => 
+                HIGH_RISK_ADDRESSES.includes(addr)
+            );
+            
+            if (highRiskConnections.length > 0) {
+                // If connected to known high-risk wallets, increase risk based on number of connections
+                const connectionRisk = Math.min(0.7, highRiskConnections.length * 0.2);
+                riskScore += connectionRisk;
             }
             
             // Cap risk score at 1.0
@@ -638,6 +731,194 @@ class NetworkAnalyzer {
         } catch (error) {
             console.error(`Error calculating wallet risk for ${address}:`, error);
             return 0.5; // Default medium risk on error
+        }
+    }
+
+    /**
+     * Check if a token has suspicious patterns
+     * @param {object} token - Token information
+     * @returns {boolean} - Whether the token has suspicious patterns
+     * @private
+     */
+    _hasTokenSuspiciousPattern(token) {
+        if (!token) return false;
+        
+        // Check currency name for suspicious terms
+        if (token.currency) {
+            const lowerCurrency = token.currency.toLowerCase();
+            for (const flag of RISK_FACTORS.token.suspicious_name.flags) {
+                if (lowerCurrency.includes(flag)) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check token amount/supply patterns
+        if (token.amount) {
+            const amount = parseFloat(token.amount);
+            // Extremely large supplies are often suspicious
+            if (amount > 1_000_000_000_000) {
+                return true;
+            }
+            
+            // Unusual precise numbers can be suspicious
+            const amountStr = amount.toString();
+            if (amountStr.endsWith('000000000') || amountStr.endsWith('999999999')) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Check a wallet's history as a creator/issuer
+     * @param {string} address - XRPL address to check
+     * @returns {Promise<object>} - Creator history information
+     * @private
+     */
+    async _checkCreatorHistory(address) {
+        const result = {
+            tokens: [],
+            previousRugs: 0,
+            averageTokenLifetime: 0
+        };
+        
+        try {
+            // Get all tokens created by this address
+            const issuedTokens = await xrplService.getIssuedTokens(address);
+            result.tokens = issuedTokens;
+            
+            // For each token, try to determine if it was a rug pull
+            let totalLifetime = 0;
+            let countedTokens = 0;
+            
+            for (const token of issuedTokens) {
+                // Calculate a rough token lifetime by looking at first and last transactions
+                const tokenTransactions = await xrplService.getTokenTransactions(token.currency, address, 50);
+                
+                if (tokenTransactions.length >= 3) {
+                    // Get first and most recent transaction
+                    const firstTx = tokenTransactions[tokenTransactions.length - 1];
+                    const lastTx = tokenTransactions[0];
+                    
+                    if (firstTx.date && lastTx.date) {
+                        const startTime = new Date(firstTx.date);
+                        const endTime = new Date(lastTx.date);
+                        const lifetimeDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
+                        
+                        totalLifetime += lifetimeDays;
+                        countedTokens++;
+                        
+                        // If token had very short lifetime and high initial volume, likely a rug
+                        const hasHighInitialVolume = this._checkForHighInitialVolume(tokenTransactions);
+                        const hasSharpValueDrop = this._checkForSharpValueDrop(tokenTransactions);
+                        
+                        if (lifetimeDays < 7 && (hasHighInitialVolume || hasSharpValueDrop)) {
+                            result.previousRugs++;
+                        }
+                    }
+                }
+            }
+            
+            // Calculate average token lifetime
+            if (countedTokens > 0) {
+                result.averageTokenLifetime = totalLifetime / countedTokens;
+            }
+            
+            return result;
+        } catch (error) {
+            console.error(`Error checking creator history for ${address}:`, error);
+            return result;
+        }
+    }
+
+    /**
+     * Check token transactions for high initial volume (common in rug pulls)
+     * @param {Array} transactions - Token transactions
+     * @returns {boolean} - Whether high initial volume is detected
+     * @private
+     */
+    _checkForHighInitialVolume(transactions) {
+        // Requires at least 10 transactions to analyze
+        if (!transactions || transactions.length < 10) return false;
+        
+        // Compare first 5 transactions volume with next 5
+        const initialVolume = transactions.slice(transactions.length - 5).reduce((total, tx) => {
+            return total + this._normalizeAmount(tx.Amount || 0);
+        }, 0);
+        
+        const laterVolume = transactions.slice(transactions.length - 10, transactions.length - 5).reduce((total, tx) => {
+            return total + this._normalizeAmount(tx.Amount || 0);
+        }, 0);
+        
+        // If initial volume is at least 3x higher than later volume, flag as suspicious
+        return initialVolume > laterVolume * 3;
+    }
+
+    /**
+     * Check token transactions for sharp value drop (common in rug pulls)
+     * @param {Array} transactions - Token transactions
+     * @returns {boolean} - Whether sharp value drop is detected
+     * @private
+     */
+    _checkForSharpValueDrop(transactions) {
+        // Requires at least 15 transactions to analyze
+        if (!transactions || transactions.length < 15) return false;
+        
+        // Try to find a pattern where value drops significantly in a short timeframe
+        const values = transactions.map(tx => this._normalizeAmount(tx.Amount || 0));
+        
+        for (let i = 0; i < values.length - 5; i++) {
+            const beforeDrop = values.slice(i, i + 3).reduce((a, b) => a + b, 0) / 3;
+            const afterDrop = values.slice(i + 3, i + 6).reduce((a, b) => a + b, 0) / 3;
+            
+            // If value dropped by 70% or more, flag as suspicious
+            if (afterDrop < beforeDrop * 0.3) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Get addresses connected to a wallet
+     * @param {string} address - XRPL address to check
+     * @returns {Promise<Array<string>>} - List of connected addresses
+     * @private
+     */
+    async _getConnectedAddresses(address) {
+        const connectedAddresses = new Set();
+        
+        try {
+            // Get account transactions to identify connected wallets
+            const transactions = await xrplService.getAccountTransactions(address, 50);
+            
+            for (const tx of transactions) {
+                // Skip invalid transactions
+                if (!tx || !tx.TransactionType) continue;
+                
+                // Add destination wallets
+                if (tx.Destination && tx.Destination !== address) {
+                    connectedAddresses.add(tx.Destination);
+                }
+                
+                // Add source wallets if this wallet is the destination
+                if (tx.Account && tx.Account !== address) {
+                    connectedAddresses.add(tx.Account);
+                }
+                
+                // Add trustline issuers
+                if (tx.TransactionType === 'TrustSet' && tx.LimitAmount && tx.LimitAmount.issuer) {
+                    connectedAddresses.add(tx.LimitAmount.issuer);
+                }
+            }
+            
+            return [...connectedAddresses];
+        } catch (error) {
+            console.error(`Error getting connected addresses for ${address}:`, error);
+            return [];
         }
     }
 
@@ -895,111 +1176,363 @@ class NetworkAnalyzer {
     _generateFindings() {
         this.findings = [];
         
-        // Finding for suspicious connections
-        if (this.metrics.suspiciousConnections > 0) {
+        try {
+            // Find nodes with highest risk scores
+            const nodeRiskScores = this.networkData.nodes
+                .filter(node => node.type === 'wallet')
+                .map(node => ({
+                    id: node.id,
+                    riskLevel: node.riskLevel || 0,
+                    properties: node
+                }))
+                .sort((a, b) => b.riskLevel - a.riskLevel);
+            
+            // Get top high-risk wallets for findings
+            const highRiskWallets = nodeRiskScores
+                .filter(node => node.riskLevel >= 0.7)
+                .slice(0, 5);
+            
+            if (highRiskWallets.length > 0) {
+                this.findings.push({
+                    type: 'high_risk_wallets',
+                    severity: 'high',
+                    description: `Found ${highRiskWallets.length} high-risk wallet${highRiskWallets.length > 1 ? 's' : ''} in the network`,
+                    details: highRiskWallets.map(wallet => ({
+                        address: wallet.id,
+                        riskScore: wallet.riskLevel.toFixed(2),
+                        reason: this._getWalletRiskReason(wallet.properties)
+                    }))
+                });
+            }
+            
+            // Check for known high-risk addresses
+            const knownHighRiskWallets = this.networkData.nodes
+                .filter(node => node.type === 'wallet' && HIGH_RISK_ADDRESSES.includes(node.id))
+                .map(node => node.id);
+            
+            if (knownHighRiskWallets.length > 0) {
+                this.findings.push({
+                    type: 'known_high_risk_wallets',
+                    severity: 'critical',
+                    description: `Found ${knownHighRiskWallets.length} wallet${knownHighRiskWallets.length > 1 ? 's' : ''} from known high-risk list`,
+                    details: knownHighRiskWallets.map(address => ({
+                        address,
+                        reason: 'Listed in known high-risk wallet registry'
+                    }))
+                });
+            }
+            
+            // Early participant analysis
+            const earlyParticipants = this.networkData.nodes
+                .filter(node => node.type === 'wallet' && node.earlyParticipant)
+                .sort((a, b) => (b.riskLevel || 0) - (a.riskLevel || 0));
+            
+            const highRiskEarlyParticipants = earlyParticipants.filter(node => node.riskLevel >= 0.6);
+            
+            if (highRiskEarlyParticipants.length > 0) {
+                this.findings.push({
+                    type: 'high_risk_early_participants',
+                    severity: 'high',
+                    description: `Found ${highRiskEarlyParticipants.length} high-risk early participant${highRiskEarlyParticipants.length > 1 ? 's' : ''} in token transactions`,
+                    details: highRiskEarlyParticipants.slice(0, 5).map(node => ({
+                        address: node.id,
+                        riskScore: (node.riskLevel || 0).toFixed(2),
+                        earlyInfo: node.earlyTxInfo || 'Early participant',
+                        reason: 'Early participant with suspicious transaction patterns'
+                    }))
+                });
+            }
+            
+            // Check for suspicious buying patterns
+            const walletsWithSuspiciousPatterns = this.networkData.nodes
+                .filter(node => node.type === 'wallet' && node.buyingPattern && node.buyingPattern.risk >= 0.4)
+                .sort((a, b) => (b.buyingPattern?.risk || 0) - (a.buyingPattern?.risk || 0));
+            
+            if (walletsWithSuspiciousPatterns.length > 0) {
+                this.findings.push({
+                    type: 'suspicious_buying_patterns',
+                    severity: 'medium',
+                    description: `Detected ${walletsWithSuspiciousPatterns.length} wallet${walletsWithSuspiciousPatterns.length > 1 ? 's' : ''} with suspicious buying patterns`,
+                    details: walletsWithSuspiciousPatterns.slice(0, 5).map(node => ({
+                        address: node.id,
+                        patternType: node.buyingPattern?.pattern || 'unknown',
+                        riskScore: (node.buyingPattern?.risk || 0).toFixed(2),
+                        description: node.buyingPattern?.summary || 'Suspicious pattern detected'
+                    }))
+                });
+            }
+            
+            // Check for unusual interconnected wallets
+            const interconnectedGroups = this._findInterconnectedWallets(this.networkData.mainNode);
+            const suspiciousGroups = interconnectedGroups.filter(group => 
+                group.avgRisk > 0.5 && group.wallets.length >= 3
+            );
+            
+            if (suspiciousGroups.length > 0) {
+                this.findings.push({
+                    type: 'interconnected_wallets',
+                    severity: 'high',
+                    description: `Found ${suspiciousGroups.length} suspicious interconnected wallet group${suspiciousGroups.length > 1 ? 's' : ''}`,
+                    details: suspiciousGroups.map(group => ({
+                        walletCount: group.wallets.length,
+                        avgRisk: group.avgRisk.toFixed(2),
+                        wallets: group.wallets.slice(0, 5),
+                        relation: group.relation
+                    }))
+                });
+            }
+            
+            // Calculate token risks
+            const tokenRisks = this.networkData.nodes
+                .filter(node => node.type === 'token')
+                .map(node => ({
+                    id: node.id,
+                    currency: node.currency,
+                    issuer: node.issuer,
+                    riskLevel: node.riskLevel || 0
+                }))
+                .sort((a, b) => b.riskLevel - a.riskLevel);
+            
+            const highRiskTokens = tokenRisks.filter(token => token.riskLevel >= 0.6);
+            
+            if (highRiskTokens.length > 0) {
+                this.findings.push({
+                    type: 'high_risk_tokens',
+                    severity: 'high',
+                    description: `Found ${highRiskTokens.length} high-risk token${highRiskTokens.length > 1 ? 's' : ''}`,
+                    details: highRiskTokens.map(token => ({
+                        currency: token.currency,
+                        issuer: token.issuer,
+                        riskScore: token.riskLevel.toFixed(2)
+                    }))
+                });
+            }
+            
+            // Check for suspicious connections between wallets
+            const suspiciousLinks = this.networkData.links
+                .filter(link => link.suspicious)
+                .map(link => ({
+                    source: typeof link.source === 'object' ? link.source.id : link.source,
+                    target: typeof link.target === 'object' ? link.target.id : link.target,
+                    properties: link
+                }));
+            
+            if (suspiciousLinks.length > 0) {
+                this.findings.push({
+                    type: 'suspicious_connections',
+                    severity: 'medium',
+                    description: `Found ${suspiciousLinks.length} suspicious connection${suspiciousLinks.length > 1 ? 's' : ''} between wallets`,
+                    details: suspiciousLinks.slice(0, 10).map(link => ({
+                        source: link.source,
+                        target: link.target,
+                        transactionType: link.properties.transactionType || 'unknown'
+                    }))
+                });
+            }
+            
+            // Analyze connected wallets with high transaction volume
+            const highVolumeConnections = this.networkData.nodes
+                .filter(node => 
+                    node.type === 'wallet' && 
+                    node.interactionData && 
+                    node.interactionData.totalValue > 1000 &&
+                    node.riskLevel >= 0.5
+                )
+                .sort((a, b) => (b.interactionData?.totalValue || 0) - (a.interactionData?.totalValue || 0));
+            
+            if (highVolumeConnections.length > 0) {
+                this.findings.push({
+                    type: 'high_volume_wallets',
+                    severity: 'medium',
+                    description: `Found ${highVolumeConnections.length} connected wallet${highVolumeConnections.length > 1 ? 's' : ''} with high transaction volume and risk`,
+                    details: highVolumeConnections.slice(0, 5).map(node => ({
+                        address: node.id,
+                        totalValue: node.interactionData?.totalValue.toFixed(2) || '0',
+                        paymentCount: node.interactionData?.paymentCount || 0,
+                        riskScore: (node.riskLevel || 0).toFixed(2)
+                    }))
+                });
+            }
+            
+            // Check for creator wallet connections
+            const issuerConnections = this.networkData.links
+                .filter(link => {
+                    const targetNode = this.networkData.nodes.find(n => 
+                        n.id === (typeof link.target === 'object' ? link.target.id : link.target)
+                    );
+                    return targetNode && targetNode.type === 'token';
+                })
+                .map(link => ({
+                    issuer: typeof link.source === 'object' ? link.source.id : link.source,
+                    token: typeof link.target === 'object' ? link.target.id : link.target
+                }));
+            
+            if (issuerConnections.length > 0) {
+                const issuerRisks = [];
+                const processedIssuers = new Set();
+                
+                for (const connection of issuerConnections) {
+                    if (!processedIssuers.has(connection.issuer)) {
+                        processedIssuers.add(connection.issuer);
+                        
+                        const issuerNode = this.networkData.nodes.find(n => n.id === connection.issuer);
+                        if (issuerNode && issuerNode.riskLevel >= 0.6) {
+                            const issuedTokens = this.networkData.nodes
+                                .filter(n => n.type === 'token' && n.issuer === connection.issuer)
+                                .map(n => ({ currency: n.currency, risk: n.riskLevel || 0 }));
+                            
+                            issuerRisks.push({
+                                address: connection.issuer,
+                                riskScore: (issuerNode.riskLevel || 0).toFixed(2),
+                                tokenCount: issuedTokens.length,
+                                tokens: issuedTokens.slice(0, 3)
+                            });
+                        }
+                    }
+                }
+                
+                if (issuerRisks.length > 0) {
+                    this.findings.push({
+                        type: 'high_risk_issuers',
+                        severity: 'high',
+                        description: `Found ${issuerRisks.length} high-risk token issuer${issuerRisks.length > 1 ? 's' : ''}`,
+                        details: issuerRisks
+                    });
+                }
+            }
+            
+            // Analyze network metrics
+            const networkRisk = this._calculateNetworkRisk();
+            const overallRiskLevel = this._getOverallRiskLevel(networkRisk);
+            
             this.findings.push({
-                severity: 'high',
-                title: 'Suspicious Wallet Connections Detected',
-                description: `Found ${this.metrics.suspiciousConnections} connections to known high-risk wallets with previous rug pull history.`
+                type: 'network_risk_assessment',
+                severity: overallRiskLevel,
+                description: `Overall network risk assessment: ${overallRiskLevel.toUpperCase()}`,
+                details: {
+                    riskScore: networkRisk.toFixed(2),
+                    suspiciousConnections: this.metrics.suspiciousConnections,
+                    connectedWallets: this.metrics.connectedWallets,
+                    highRiskWalletCount: highRiskWallets.length,
+                    highRiskTokenCount: highRiskTokens.length
+                }
             });
-        }
-        
-        // Finding for high-risk wallets
-        const highRiskWallets = this.networkData.nodes.filter(node => 
-            node.type === 'wallet' && node.riskLevel > 0.7
-        ).length;
-        
-        if (highRiskWallets > 0) {
+            
+        } catch (error) {
+            console.error('Error generating findings:', error);
             this.findings.push({
-                severity: 'high',
-                title: 'Connected to High-Risk Wallets',
-                description: `${highRiskWallets} connected wallets have been flagged for suspicious activity on the XRPL.`
-            });
-        }
-        
-        // Finding for early trust line positions
-        const earlyTrustlineWallets = this.networkData.nodes.filter(node => 
-            node.type === 'wallet' && 
-            node.enhancedRiskData && 
-            node.enhancedRiskData.trustlinePosition > 0 && 
-            node.enhancedRiskData.trustlinePosition < 10
-        ).length;
-        
-        if (earlyTrustlineWallets > 0) {
-            this.findings.push({
-                severity: 'high',
-                title: 'Early Trust Line Positions Detected',
-                description: `Found ${earlyTrustlineWallets} wallets with very early trust line positions (1-10), indicating potential coordinated activity or insider connections.`
-            });
-        }
-        
-        // Finding for creator-connected wallets
-        const creatorConnectedWallets = this.networkData.nodes.filter(node => 
-            node.type === 'wallet' && 
-            node.enhancedRiskData && 
-            node.enhancedRiskData.creatorConnection
-        ).length;
-        
-        if (creatorConnectedWallets > 0) {
-            this.findings.push({
-                severity: 'high',
-                title: 'Creator-Connected Wallets Identified',
-                description: `Found ${creatorConnectedWallets} wallets directly connected to the token creator, suggesting possible related entities operating multiple wallets.`
-            });
-        }
-        
-        // Finding for token connections
-        if (this.metrics.connectedTokens > 3) {
-            this.findings.push({
-                severity: this.metrics.connectedTokens > 5 ? 'high' : 'medium',
-                title: 'Multiple Token Connections',
-                description: `This wallet is connected to ${this.metrics.connectedTokens} tokens. Multiple connections in a short time can be a red flag.`
-            });
-        }
-        
-        // Finding for risky tokens
-        const riskyTokens = this.networkData.nodes.filter(node => 
-            node.type === 'token' && node.riskLevel > 0.7
-        ).length;
-        
-        if (riskyTokens > 0) {
-            this.findings.push({
-                severity: 'high',
-                title: 'Risky Token Issuances',
-                description: `${riskyTokens} tokens issued by or connected to this wallet show high-risk patterns common in rug pulls.`
-            });
-        }
-        
-        // Finding for early participants
-        const earlyParticipants = this.networkData.nodes.filter(node => 
-            node.type === 'wallet' && node.earlyParticipant
-        ).length;
-        
-        if (earlyParticipants > 2) {
-            this.findings.push({
-                severity: 'medium',
-                title: 'Early Participant Network Detected',
-                description: `Found ${earlyParticipants} wallets that were early participants in token transactions, which may indicate coordinated activity.`
-            });
-        }
-        
-        // Finding for network structure
-        if (this.metrics.connectedWallets < 3) {
-            this.findings.push({
-                severity: 'medium',
-                title: 'Limited Network Activity',
-                description: 'This wallet has very few connections, which might indicate a new or isolated account.'
-            });
-        }
-        
-        // Add a neutral finding if risk is low
-        if (this.metrics.riskScore < 30 && this.findings.length < 2) {
-            this.findings.push({
+                type: 'error',
                 severity: 'low',
-                title: 'No Major Red Flags',
-                description: 'This wallet shows no significant signs of suspicious activity based on current analysis.'
+                description: 'Error generating complete findings',
+                details: { error: error.message }
             });
         }
+    }
+
+    /**
+     * Get textual description of why a wallet is high risk
+     * @param {object} walletNode - Wallet node data
+     * @returns {string} - Risk reason
+     * @private
+     */
+    _getWalletRiskReason(walletNode) {
+        if (!walletNode) return 'Unknown reason';
+        
+        const reasons = [];
+        
+        if (HIGH_RISK_ADDRESSES.includes(walletNode.id)) {
+            reasons.push('Known high-risk wallet');
+        }
+        
+        if (walletNode.enhancedRiskData) {
+            if (walletNode.enhancedRiskData.activityRisk > 0.7) {
+                reasons.push('Suspicious transaction activity');
+            }
+            
+            if (walletNode.enhancedRiskData.ageRisk > 0.7) {
+                reasons.push('Recently created wallet');
+            }
+            
+            if (walletNode.enhancedRiskData.connectionRisk > 0.7) {
+                reasons.push('Connected to high-risk wallets');
+            }
+        }
+        
+        if (walletNode.walletType === 'issuer' && walletNode.riskLevel > 0.6) {
+            reasons.push('High-risk token issuer');
+        }
+        
+        if (walletNode.earlyParticipant && walletNode.riskLevel > 0.6) {
+            reasons.push('High-risk early participant');
+        }
+        
+        if (walletNode.buyingPattern && walletNode.buyingPattern.risk > 0.5) {
+            reasons.push(`Suspicious buying pattern: ${walletNode.buyingPattern.pattern}`);
+        }
+        
+        if (walletNode.interactionData && walletNode.interactionData.totalValue > 1000 && walletNode.riskLevel > 0.5) {
+            reasons.push('High transaction volume with suspicious patterns');
+        }
+        
+        return reasons.length > 0 ? reasons.join(', ') : 'Multiple risk factors';
+    }
+
+    /**
+     * Calculate overall network risk
+     * @returns {number} - Risk score (0-1)
+     * @private
+     */
+    _calculateNetworkRisk() {
+        // Count high risk nodes and connections
+        const nodeCount = this.networkData.nodes.length;
+        const highRiskNodes = this.networkData.nodes.filter(node => node.riskLevel >= 0.7).length;
+        const highRiskRatio = nodeCount > 0 ? highRiskNodes / nodeCount : 0;
+        
+        // Calculate suspicious connection ratio
+        const linkCount = this.networkData.links.length;
+        const suspiciousLinkCount = this.networkData.links.filter(link => link.suspicious).length;
+        const suspiciousLinkRatio = linkCount > 0 ? suspiciousLinkCount / linkCount : 0;
+        
+        // Consider the number of high-risk early participants
+        const earlyParticipants = this.networkData.nodes.filter(node => node.earlyParticipant);
+        const highRiskEarlyParticipants = earlyParticipants.filter(node => node.riskLevel >= 0.6);
+        const earlyParticipantRisk = earlyParticipants.length > 0 ? 
+            highRiskEarlyParticipants.length / earlyParticipants.length : 0;
+        
+        // Consider buying patterns
+        const walletsWithPatterns = this.networkData.nodes.filter(node => 
+            node.type === 'wallet' && node.buyingPattern && node.buyingPattern.risk > 0
+        );
+        const avgPatternRisk = walletsWithPatterns.length > 0 ?
+            walletsWithPatterns.reduce((sum, node) => sum + (node.buyingPattern?.risk || 0), 0) / walletsWithPatterns.length : 0;
+        
+        // Consider known high-risk wallets
+        const knownHighRiskWallets = this.networkData.nodes
+            .filter(node => node.type === 'wallet' && HIGH_RISK_ADDRESSES.includes(node.id))
+            .length;
+        const knownHighRiskImpact = knownHighRiskWallets > 0 ? Math.min(1, knownHighRiskWallets * 0.3) : 0;
+        
+        // Calculate weighted average of all risk factors
+        return (
+            (highRiskRatio * 0.3) +
+            (suspiciousLinkRatio * 0.2) +
+            (earlyParticipantRisk * 0.15) +
+            (avgPatternRisk * 0.15) +
+            (knownHighRiskImpact * 0.2)
+        );
+    }
+
+    /**
+     * Convert risk score to descriptive level
+     * @param {number} riskScore - Risk score (0-1)
+     * @returns {string} - Risk level description (low, medium, high, critical)
+     * @private
+     */
+    _getOverallRiskLevel(riskScore) {
+        if (riskScore >= 0.8) return 'critical';
+        if (riskScore >= 0.6) return 'high';
+        if (riskScore >= 0.4) return 'medium';
+        return 'low';
     }
 
     /**
@@ -1585,6 +2118,53 @@ class NetworkAnalyzer {
                 suspiciousConnectionsCount: 0
             };
         }
+    }
+
+    /**
+     * Analyze buying patterns to detect suspicious behavior
+     * @param {object} interactionData - Data about wallet interactions
+     * @returns {object} Pattern analysis results
+     * @private
+     */
+    _analyzeBuyingPattern(interactionData) {
+        if (!interactionData) return { risk: 0, pattern: 'unknown' };
+        
+        const { paymentCount, tokenTransfers, totalValue, patterns } = interactionData;
+        let patternRisk = 0;
+        let patternType = 'normal';
+        
+        // Check for pump & dump patterns (many small buys)
+        if (patterns.frequentSmallPayments > 5) {
+            patternRisk += 0.3;
+            patternType = 'frequent_small_buys';
+        }
+        
+        // Check for whale manipulation (few large transactions)
+        if (patterns.largeOneTimePayments > 1 && paymentCount < 5) {
+            patternRisk += 0.4;
+            patternType = 'whale_pattern';
+        }
+        
+        // Check for high token transfer ratio
+        if (tokenTransfers > 0 && paymentCount > 0) {
+            const tokenRatio = tokenTransfers / paymentCount;
+            if (tokenRatio > 0.8) {
+                patternRisk += 0.2;
+                patternType = patternType === 'normal' ? 'token_focused' : `${patternType}_token_focused`;
+            }
+        }
+        
+        // Check for early / rapid interactions
+        if (interactionData.trustRelationship && paymentCount > 3 && totalValue > 500) {
+            patternRisk += 0.3;
+            patternType = patternType === 'normal' ? 'rapid_trust_activity' : `${patternType}_with_trust`;
+        }
+        
+        return {
+            risk: Math.min(patternRisk, 1.0),
+            pattern: patternType,
+            summary: `${patternType} (${Math.round(patternRisk * 100)}% risk)`
+        };
     }
 }
 
