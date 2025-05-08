@@ -1,6 +1,6 @@
 # RugCheckerX - XRPL Security Analysis Tool
 
-![RugCheckerX Logo](rugcheck.png)
+![RugCheckerX Logo](rugcheckpng2.png)
 
 ## About RugCheckerX
 
