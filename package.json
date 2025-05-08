@@ -1,0 +1,19 @@
+{
+  "name": "rugcheckerx",
+  "version": "1.0.0",
+  "description": "RugCheckerX - Advanced XRPL wallet and token analyzer",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx http-server -c-1 -o index.html",
+    "dev": "npx http-server -c-1 -o index.html"
+  },
+  "dependencies": {
+    "xrpl": "^2.7.0",
+    "d3": "^7.8.5"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  },
+  "author": "RugCheckerX Team",
+  "license": "MIT"
+} 
