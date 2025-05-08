@@ -2108,7 +2108,7 @@ function showComingSoonAlert(featureName) {
         <div class="alert-content">
             <h4>${featureName} - Coming Soon!</h4>
             <p>This feature is currently under development and will be available in a future update.</p>
-            <p class="alert-eta">Expected in Q2 2024</p>
+            <p class="alert-eta">Expected in Q2 2025</p>
             <button class="alert-close-btn">Got it</button>
         </div>
     `;
