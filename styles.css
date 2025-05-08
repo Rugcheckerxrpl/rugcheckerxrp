@@ -132,6 +132,11 @@ nav ul li a:hover {
     gap: 15px;
 }
 
+.social-links form {
+    margin: 0;
+    padding: 0;
+}
+
 .social-icon {
     width: 36px;
     height: 36px;
@@ -143,6 +148,8 @@ nav ul li a:hover {
     transition: all 0.3s ease;
     color: var(--text-light);
     font-size: 18px;
+    border: none;
+    cursor: pointer;
 }
 
 .social-icon:hover {
@@ -1425,6 +1432,11 @@ footer .container {
     gap: 20px;
 }
 
+.community-buttons form {
+    margin: 0;
+    padding: 0;
+}
+
 .community-btn {
     padding: 12px 24px;
     border-radius: 8px;
@@ -1433,6 +1445,8 @@ footer .container {
     gap: 10px;
     font-weight: 600;
     transition: all 0.3s ease;
+    border: none;
+    cursor: pointer;
 }
 
 .telegram-btn {
