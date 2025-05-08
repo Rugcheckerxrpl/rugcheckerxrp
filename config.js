@@ -71,7 +71,20 @@ export const HIGH_RISK_ADDRESSES = [
     'r3XhydxYWps8EP6xzqs7dEU4DXMjBme95p', // Tag: 74920348
     'rNxp4h8apvRis6mJf9Sh8C6iRxfrDWN7AV', // Tag: 330128380
     'rJMwiqzh3agMG6Hqpa93ycy7GSKtT3EqRW',
-    'rnAgPrUpE3sWaNAaFhWdKhTL4uYUw1Cxuz' // Tag: 74920348
+    'rnAgPrUpE3sWaNAaFhWdKhTL4uYUw1Cxuz', // Tag: 74920348
+    // New addresses from user
+    'rNGkUxPVuXQiUV1Qmam2NoXykdvk7KKuGa', // Tag: 2113104184
+    'rQjMyVwfvjhfhnYtK4K26M4FHngPceXq3',
+    'rMzaEaPx5heMcKgoHeR56xC6DNzxqkeDwt',
+    'rEbAAaLMgk58YvNQuV2weyHre6pRwKdKia',
+    'rshibopEBREqsfnjERMzn56qvbvZnTScfh',
+    'rLWbGeF9B7SwJFb1pnAkwzNL6ehVPhF8xg',
+    'rBWpYJhuJWBPAkzJ4kYQqHShSkkF3rgeD', // Tag: 812430925
+    'rsjzmZ4WfonC3pXS52zoCxTYfqfiBgCis1', // Tag: 482440097
+    'rDCuukSk6NQuFEwFXR5vqVkJrQNezS9cZk',
+    'rfa5HrDzTUe3g3UVYQE9y5hgLTRtcrZJvM',
+    'rpNF4938Y8zCrqFP2owDHjMUdpAxMs49JD', // Tag: 1241538349
+    'raCWHpJj1FgvtpFZQjFxc5C4FyQ6PAAGrN'
 ];
 
 // Validators for input validation

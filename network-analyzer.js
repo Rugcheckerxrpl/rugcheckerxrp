@@ -121,6 +121,32 @@ class NetworkAnalyzer {
             // Enhanced data collection for buying patterns
             const walletInteractions = new Map();
             
+            // Check if this wallet is the creator of the main address
+            let isCreatorWallet = false;
+            if (currentDepth === 1) {
+                try {
+                    const mainAccountInfo = await xrplService.getAccountInfo(this.networkData.mainNode);
+                    if (mainAccountInfo && mainAccountInfo.Account && mainAccountInfo.Account.TransactionHistory) {
+                        const activationTx = mainAccountInfo.Account.TransactionHistory.find(tx => 
+                            tx.TransactionType === 'AccountSet' && tx.Account === address);
+                        if (activationTx) {
+                            isCreatorWallet = true;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Could not determine if wallet is creator wallet:', err);
+                }
+            }
+            
+            // Enhance high-risk address cross-referencing
+            let isHighRiskWallet = false;
+            // Extract the base address without source tag for comparison
+            const baseAddress = address.split(':')[0];
+            
+            if (HIGH_RISK_ADDRESSES.includes(baseAddress)) {
+                isHighRiskWallet = true;
+            }
+            
             for (const tx of transactions) {
                 // Skip invalid transactions
                 if (!tx || !tx.TransactionType) continue;
@@ -227,18 +253,25 @@ class NetworkAnalyzer {
                         // Get wallet interaction data
                         const interactionData = walletInteractions.get(wallet) || {};
                         
+                        // Cross-reference with high-risk addresses
+                        // Extract the base address without source tag for comparison
+                        const baseWallet = wallet.split(':')[0];
+                        const isHighRisk = HIGH_RISK_ADDRESSES.includes(baseWallet);
+                        
                         // Add additional properties for better visualization
-                        const walletType = enhancedRisk.type || 'standard';
+                        const walletType = isHighRisk ? 'high-risk' : enhancedRisk.type || 'standard';
                         const isHighActivity = enhancedRisk.activityRisk > 0.6;
                         const isPotentiallyEarly = enhancedRisk.ageRisk < 0.3 && initialRisk > 0.5;
                         
                         // Add the wallet node with enhanced properties
                         this.addNode(wallet, 'wallet', {
-                            radius: 8 + (initialRisk * 2), // Size based on risk
-                            riskLevel: initialRisk,
+                            radius: isHighRisk ? 12 : 8 + (initialRisk * 2), // Larger size for high-risk wallets
+                            riskLevel: isHighRisk ? 1.0 : initialRisk,
                             walletType: walletType,
                             highActivity: isHighActivity,
                             potentialEarly: isPotentiallyEarly,
+                            isHighRisk: isHighRisk, // Flag for high-risk addresses
+                            isCreatorWallet: isCreatorWallet, // Flag for creator wallet
                             enhancedRiskData: enhancedRisk,
                             interactionData: interactionData, // Add interaction data to node
                             buyingPattern: this._analyzeBuyingPattern(interactionData)
@@ -252,6 +285,9 @@ class NetworkAnalyzer {
                     }
                 }
             }
+            
+            // Add direct connections between high-risk wallets in our network
+            this._connectHighRiskWallets();
             
         } catch (error) {
             console.error(`Error analyzing connections for ${address}:`, error);
@@ -656,8 +692,11 @@ class NetworkAnalyzer {
     async _calculateWalletRisk(address) {
         let riskScore = 0;
         
+        // Extract the base address without source tag for comparison
+        const baseAddress = address.split(':')[0];
+        
         // Check if this is a known high-risk address
-        if (HIGH_RISK_ADDRESSES.includes(address)) {
+        if (HIGH_RISK_ADDRESSES.includes(baseAddress)) {
             return 1.0; // Maximum risk
         }
         
@@ -716,14 +755,34 @@ class NetworkAnalyzer {
             
             // Check for connections to known high-risk wallets
             const connectedAddresses = await this._getConnectedAddresses(address);
-            const highRiskConnections = connectedAddresses.filter(addr => 
-                HIGH_RISK_ADDRESSES.includes(addr)
-            );
+            const highRiskConnections = connectedAddresses.filter(addr => {
+                // Extract base address without source tag
+                const baseAddr = addr.split(':')[0];
+                return HIGH_RISK_ADDRESSES.includes(baseAddr);
+            });
             
             if (highRiskConnections.length > 0) {
                 // If connected to known high-risk wallets, increase risk based on number of connections
                 const connectionRisk = Math.min(0.7, highRiskConnections.length * 0.2);
                 riskScore += connectionRisk;
+            }
+            
+            // Check for creator wallet connection to issuer
+            // If this wallet created the token issuer, it has higher risk
+            if (this.networkData.mainNode && this.networkData.mainNode !== address) {
+                try {
+                    const mainAccountInfo = await xrplService.getAccountInfo(this.networkData.mainNode);
+                    if (mainAccountInfo && mainAccountInfo.Account && mainAccountInfo.Account.TransactionHistory) {
+                        const activationTx = mainAccountInfo.Account.TransactionHistory.find(tx => 
+                            tx.TransactionType === 'AccountSet' && tx.Account === address);
+                        if (activationTx) {
+                            // This wallet created the issuer - significant risk factor
+                            riskScore += 0.4;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Could not check creator wallet connection:', err);
+                }
             }
             
             // Cap risk score at 1.0
@@ -1207,17 +1266,44 @@ class NetworkAnalyzer {
             
             // Check for known high-risk addresses
             const knownHighRiskWallets = this.networkData.nodes
-                .filter(node => node.type === 'wallet' && HIGH_RISK_ADDRESSES.includes(node.id))
-                .map(node => node.id);
+                .filter(node => {
+                    if (node.type !== 'wallet') return false;
+                    const baseAddress = node.id.split(':')[0];
+                    return HIGH_RISK_ADDRESSES.includes(baseAddress);
+                })
+                .map(node => ({
+                    id: node.id,
+                    baseAddress: node.id.split(':')[0],
+                    sourceTag: node.id.includes(':') ? node.id.split(':')[1] : null
+                }));
             
             if (knownHighRiskWallets.length > 0) {
                 this.findings.push({
                     type: 'known_high_risk_wallets',
                     severity: 'critical',
                     description: `Found ${knownHighRiskWallets.length} wallet${knownHighRiskWallets.length > 1 ? 's' : ''} from known high-risk list`,
-                    details: knownHighRiskWallets.map(address => ({
-                        address,
+                    details: knownHighRiskWallets.map(wallet => ({
+                        address: wallet.id,
+                        baseAddress: wallet.baseAddress,
+                        sourceTag: wallet.sourceTag,
                         reason: 'Listed in known high-risk wallet registry'
+                    }))
+                });
+            }
+            
+            // Find creator wallet if present
+            const creatorWallets = this.networkData.nodes
+                .filter(node => node.type === 'wallet' && node.isCreatorWallet);
+            
+            if (creatorWallets.length > 0) {
+                this.findings.push({
+                    type: 'creator_wallet_identified',
+                    severity: 'high',
+                    description: `Identified ${creatorWallets.length} creator wallet${creatorWallets.length > 1 ? 's' : ''} that activated the issuer address`,
+                    details: creatorWallets.map(node => ({
+                        address: node.id,
+                        riskLevel: (node.riskLevel || 0).toFixed(2),
+                        reason: 'This wallet created/activated the main address being analyzed'
                     }))
                 });
             }
@@ -1259,6 +1345,26 @@ class NetworkAnalyzer {
                         riskScore: (node.buyingPattern?.risk || 0).toFixed(2),
                         description: node.buyingPattern?.summary || 'Suspicious pattern detected'
                     }))
+                });
+            }
+            
+            // Check for connections between high-risk wallets
+            const highRiskConnections = this.networkData.links
+                .filter(link => link.highRiskConnection)
+                .map(link => ({
+                    source: typeof link.source === 'object' ? link.source.id : link.source,
+                    target: typeof link.target === 'object' ? link.target.id : link.target
+                }));
+            
+            if (highRiskConnections.length > 0) {
+                this.findings.push({
+                    type: 'high_risk_wallet_connections',
+                    severity: 'critical',
+                    description: `Found ${highRiskConnections.length} connection${highRiskConnections.length > 1 ? 's' : ''} between high-risk wallets`,
+                    details: {
+                        connectionCount: highRiskConnections.length,
+                        connections: highRiskConnections.slice(0, 10) // Limit to 10 connections
+                    }
                 });
             }
             
@@ -1414,7 +1520,8 @@ class NetworkAnalyzer {
                     suspiciousConnections: this.metrics.suspiciousConnections,
                     connectedWallets: this.metrics.connectedWallets,
                     highRiskWalletCount: highRiskWallets.length,
-                    highRiskTokenCount: highRiskTokens.length
+                    highRiskTokenCount: highRiskTokens.length,
+                    highRiskRegistryMatches: knownHighRiskWallets.length
                 }
             });
             
@@ -2165,6 +2272,66 @@ class NetworkAnalyzer {
             pattern: patternType,
             summary: `${patternType} (${Math.round(patternRisk * 100)}% risk)`
         };
+    }
+
+    /**
+     * Connect high-risk wallets to each other in the network visualization
+     * This ensures that known suspicious wallets show their relationships
+     * @private
+     */
+    _connectHighRiskWallets() {
+        try {
+            // Get all high-risk wallet nodes in our current network
+            const highRiskWallets = this.networkData.nodes.filter(node => 
+                node.type === 'wallet' && 
+                (node.isHighRisk || HIGH_RISK_ADDRESSES.includes(node.id.split(':')[0]))
+            );
+            
+            // Skip if there are fewer than 2 high-risk wallets
+            if (highRiskWallets.length < 2) {
+                return;
+            }
+            
+            console.log(`Connecting ${highRiskWallets.length} high-risk wallets to each other`);
+            
+            // Connect each high-risk wallet to every other high-risk wallet
+            for (let i = 0; i < highRiskWallets.length; i++) {
+                for (let j = i + 1; j < highRiskWallets.length; j++) {
+                    const wallet1 = highRiskWallets[i];
+                    const wallet2 = highRiskWallets[j];
+                    
+                    // Add a high-risk connection between these wallets
+                    this._addConnection(wallet1.id, wallet2.id, {
+                        value: 2, // Medium strength connection
+                        suspicious: true, // Always mark as suspicious
+                        transactionType: 'HighRiskConnection',
+                        highRiskConnection: true
+                    });
+                }
+            }
+            
+            // Also connect all high-risk wallets to the main node if they aren't already
+            for (const wallet of highRiskWallets) {
+                if (wallet.id !== this.networkData.mainNode) {
+                    // Check if connection already exists
+                    const existingConnection = this.networkData.links.some(link => 
+                        (link.source === wallet.id && link.target === this.networkData.mainNode) ||
+                        (link.target === wallet.id && link.source === this.networkData.mainNode)
+                    );
+                    
+                    if (!existingConnection) {
+                        this._addConnection(this.networkData.mainNode, wallet.id, {
+                            value: 3, // Stronger connection to main node
+                            suspicious: true,
+                            transactionType: 'HighRiskMainConnection',
+                            highRiskConnection: true
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error connecting high-risk wallets:', error);
+        }
     }
 }
 
