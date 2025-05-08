@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RugCheckerX - XRPL Security Analysis</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="icon" href="rugcheck.png" type="image/png">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="rugcheck.png" alt="RugCheckerX Logo" class="header-logo">
+                <h1>RugCheckerX</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="#home">Home</a></li>
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#analyzer">Analyzer</a></li>
+                    <li><a href="#roadmap">Roadmap</a></li>
+                    <li><a href="#about">About</a></li>
+                    <li><a href="#" class="buy-button">BUY - RCXRP</a></li>
+                </ul>
+            </nav>
+            <div class="social-links">
+                <a href="#" class="social-icon telegram-icon" title="Join our Telegram"><i class="fab fa-telegram-plane"></i></a>
+                <a href="#" class="social-icon twitter-icon" title="Follow us on X"><i class="fab fa-twitter"></i></a>
+            </div>
+        </div>
+    </header>
+
+    <section id="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h2>Advanced XRPL Security Analysis</h2>
+                <p>Scan wallets, track token issuances, and detect potential rug pulls on the XRP Ledger</p>
+                <a href="#analyzer" class="btn">Start Scanning</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="features">
+        <div class="container">
+            <h2>Security Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔍</div>
+                    <h3>Wallet Analysis</h3>
+                    <p>Deep scan of wallet history, connections, and suspicious patterns</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🕸️</div>
+                    <h3>Connection Mapping</h3>
+                    <p>Visualize relationships between wallets and track fund movements</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🧪</div>
+                    <h3>Token Verification</h3>
+                    <p>Analyze tokens and issuer history for red flags</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚠️</div>
+                    <h3>Risk Assessment</h3>
+                    <p>Get instant security ratings and detailed risk reports</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="analyzer" class="dark-section">
+        <div class="forest-pattern"></div>
+        <div class="container">
+            <h2>XRPL Security Scanner</h2>
+            <div class="scanner-container">
+                <div class="input-area">
+                    <input type="text" id="wallet-address" placeholder="Enter XRPL wallet address or token ID">
+                    <button id="scan-button" class="btn">Scan</button>
+                </div>
+                <div class="visualization-container">
+                    <div id="network-visualization"></div>
+                    <div class="scan-metrics">
+                        <div class="metric">
+                            <span class="metric-value" id="risk-score">--</span>
+                            <span class="metric-label">Risk Score</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value" id="connected-wallets">--</span>
+                            <span class="metric-label">Connected Wallets</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value" id="connected-tokens">--</span>
+                            <span class="metric-label">Connected Tokens</span>
+                        </div>
+                    </div>
+                    <div class="risk-classification-window">
+                        <h4>Risk Classification</h4>
+                        <div class="risk-levels">
+                            <div class="risk-level low-risk">
+                                <span class="risk-dot"></span>
+                                <span class="risk-text">Low Risk</span>
+                            </div>
+                            <div class="risk-level medium-risk">
+                                <span class="risk-dot"></span>
+                                <span class="risk-text">Medium Risk</span>
+                            </div>
+                            <div class="risk-level high-risk">
+                                <span class="risk-dot"></span>
+                                <span class="risk-text">High Risk</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="results-panel">
+                    <div class="panel-header">
+                        <h3>Scan Results</h3>
+                    </div>
+                    <div class="panel-content" id="scan-results">
+                        <p class="placeholder-text">Enter a wallet address or token ID to begin scanning</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="about">
+        <div class="container">
+            <h2>About RugCheckerX</h2>
+            <p>RugCheckerX is an advanced security tool for the XRP Ledger ecosystem. Our platform helps users identify potential scams, track suspicious wallet activity, and analyze tokens before investing.</p>
+            <p>Using cutting-edge visualization and data analysis, we provide a comprehensive view of connections between wallets and tokens, helping protect the XRPL community from rug pulls and other security threats.</p>
+        </div>
+    </section>
+
+    <section id="roadmap" class="dark-section">
+        <div class="forest-pattern"></div>
+        <div class="container">
+            <h2>Development Roadmap</h2>
+            <div class="roadmap-container">
+                <div class="tokenomics-panel">
+                    <h3>RCXRP Tokenomics</h3>
+                    <div class="tokenomics-grid">
+                        <div class="tokenomics-item">
+                            <div class="tokenomics-icon">💰</div>
+                            <h4>Total Supply</h4>
+                            <p>100,000,000 RCXRP</p>
+                        </div>
+                        <div class="tokenomics-item">
+                            <div class="tokenomics-icon">⚡</div>
+                            <h4>Silver Tier</h4>
+                            <p>Starting at 1,000,000 RCXRP</p>
+                        </div>
+                        <div class="tokenomics-item">
+                            <div class="tokenomics-icon">🥇</div>
+                            <h4>Membership Tiers</h4>
+                            <p>Platinum, Gold, Silver</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="roadmap-web">
+                    <div class="web-center">
+                        <div class="center-icon">
+                            <svg class="roadmap-logo" width="50" height="50" viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="25" cy="25" r="23" stroke="#1B5E20" stroke-width="2"/>
+                                <path d="M25 5 L25 45" stroke="#1B5E20" stroke-width="2"/>
+                                <path d="M5 25 L45 25" stroke="#1B5E20" stroke-width="2"/>
+                                <path d="M11 11 L39 39" stroke="#1B5E20" stroke-width="2"/>
+                                <path d="M11 39 L39 11" stroke="#1B5E20" stroke-width="2"/>
+                                <circle cx="25" cy="25" r="10" fill="#1B5E20" opacity="0.7"/>
+                            </svg>
+                            <span>RCXRP</span>
+                        </div>
+                    </div>
+                    
+                    <div class="web-phase phase-1">
+                        <div class="phase-content">
+                            <h4>Phase 1: Core Analysis</h4>
+                            <ul class="roadmap-list">
+                                <li>Advanced wallet risk profiling</li>
+                                <li>Enhanced token issuance analysis</li>
+                                <li>Network visualization improvements</li>
+                                <li>Wallet transaction history insights</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="web-phase phase-2">
+                        <div class="phase-content">
+                            <h4>Phase 2: Alert Systems</h4>
+                            <ul class="roadmap-list">
+                                <li>Real-time token issuance alerts</li>
+                                <li>Automatic rug detection for new tokens</li>
+                                <li>Suspicious transaction pattern notifications</li>
+                                <li>Early warning system for high-risk wallets</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="web-phase phase-3">
+                        <div class="phase-content">
+                            <h4>Phase 3: Advanced Security</h4>
+                            <ul class="roadmap-list">
+                                <li>Predictive risk modeling</li>
+                                <li>Cross-chain analysis capabilities</li>
+                                <li>Wallet tracking with automated reports</li>
+                                <li>AI-powered scam detection algorithms</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="web-phase phase-4">
+                        <div class="phase-content">
+                            <h4>Phase 4: Community Features</h4>
+                            <ul class="roadmap-list">
+                                <li>Community-verified token registry</li>
+                                <li>API access for developers and partners</li>
+                                <li>Reputation system for token issuers</li>
+                                <li>Integration with major XRPL platforms</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="community-panel">
+                    <h3>Community Commitment</h3>
+                    <p>Join our Telegram community to connect with fellow XRPL enthusiasts. Our Telegram channel is a safe space to discuss projects, share token insights, and build a stronger, more secure XRPL ecosystem together.</p>
+                    <div class="community-buttons">
+                        <a href="#" class="community-btn telegram-btn"><i class="fab fa-telegram-plane"></i> Join Telegram</a>
+                        <a href="#" class="community-btn twitter-btn"><i class="fab fa-twitter"></i> Follow on X</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="guide" class="light-section">
+        <div class="container">
+            <h2>How to Use RugCheckerX</h2>
+            <div class="guide-container">
+                <div class="guide-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Enter Wallet or Token</h3>
+                        <p>Input any XRPL wallet address or token ID into the search field. RugCheckerX accepts both standard r-addresses and token identifiers.</p>
+                    </div>
+                </div>
+                <div class="guide-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Initiate Scan</h3>
+                        <p>Click the "Scan" button to begin the analysis. Our system will query the XRPL and analyze network connections, transactions, and token data.</p>
+                    </div>
+                </div>
+                <div class="guide-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Explore Visualization</h3>
+                        <p>Examine the network visualization to see connections between wallets and tokens. Different colors indicate various risk levels and relationship types.</p>
+                        <ul class="guide-tips">
+                            <li>Drag nodes to rearrange the visualization</li>
+                            <li>Hover over connections to see transaction details</li>
+                            <li>Click on nodes to view detailed information</li>
+                            <li>Use scroll wheel to zoom in and out</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="guide-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Review Risk Analysis</h3>
+                        <p>Check the risk score and detailed findings in the results panel. Our algorithm analyzes multiple factors to determine potential rug pull risks:</p>
+                        <ul class="guide-tips">
+                            <li>Wallet age and activity patterns</li>
+                            <li>Token distribution and holder concentration</li>
+                            <li>Suspicious transaction patterns</li>
+                            <li>Connections to known high-risk addresses</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 RugCheckerX. All rights reserved.</p>
+            <div class="footer-links">
+                <a href="#">Terms of Service</a>
+                <a href="#">Privacy Policy</a>
+                <a href="#">Contact</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html> 
